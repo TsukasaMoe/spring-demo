@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.2.xsd
+						http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.2.xsd
+						http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-4.2.xsd">
+
+    <context:component-scan base-package="moe.tsukasa.quartz.service"/>
+
+    <!-- 加载数据库连接信息配置文件 -->
+    <context:property-placeholder location="classpath:db.properties"/>
+
+    <!-- c3p0连接池  -->
+    <bean id="dataSource" class="com.mchange.v2.c3p0.ComboPooledDataSource"
+          scope="singleton" lazy-init="true" destroy-method="close">
+        <property name="driverClass" value="${jdbc.driverClass}"/>
+        <property name="jdbcUrl" value="${jdbc.jdbcUrl}"/>
+        <property name="user" value="${jdbc.user}"/>
+        <property name="password" value="${jdbc.password}"/>
+        <property name="idleConnectionTestPeriod" value="${jdbc.idleConnectionTestPeriod}"/>
+        <property name="maxIdleTime" value="${jdbc.maxIdleTime}"/>
+        <property name="acquireIncrement" value="${jdbc.acquireIncrement}"/>
+        <property name="initialPoolSize" value="${jdbc.initialPoolSize}"/>
+        <property name="maxPoolSize" value="${jdbc.maxPoolSize}"/>
+        <property name="minPoolSize" value="${jdbc.minPoolSize}"/>
+        <property name="autoCommitOnClose" value="${jdbc.autoCommitOnClose}"/>
+        <property name="checkoutTimeout" value="${jdbc.checkoutTimeout}"/>
+        <property name="acquireRetryAttempts" value="${jdbc.acquireRetryAttempts}"/>
+    </bean>
+
+    <!-- 配置Mybatis工厂，整合Spring和Mybatis -->
+    <bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+        <property name="dataSource" ref="dataSource"/>
+        <property name="configLocation" value="classpath:mybatis-config.xml"/>
+        <property name="mapperLocations" value="classpath:mapper/*.xml"/>
+        <!-- 无需再mybatis-config配置别名 -->
+        <property name="typeAliasesPackage" value="moe.tsukasa.quartz.entity"/>
+    </bean>
+
+    <!-- Mapper动态代理开发  扫包  给定包下的接口文件名和映射文件名必须相同  创建接口的实现类-->
+    <bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+        <property name="basePackage" value="moe.tsukasa.quartz.dao"/>
+    </bean>
+
+    <!-- 开启事物 -->
+    <bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+        <property name="dataSource" ref="dataSource"/>
+    </bean>
+    <!-- 事物注解驱动-->
+    <tx:annotation-driven/>
+
+    <!-- 单机定时任务 -->
+    <bean name="nonClusteredScheduleTask" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
+        <property name="triggers">
+            <list>
+                <ref bean="triggerLocalCacheRefresh"/>
+            </list>
+        </property>
+    </bean>
+
+    <!-- 本地缓存加载定时任务 -->
+    <bean id="triggerLocalCacheRefresh" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+        <property name="jobDetail" ref="localCacheRefreshJob"/>
+        <property name="cronExpression" value="* */10 * * * ?"/>
+    </bean>
+    <bean id="localCacheRefreshJob" class="org.springframework.scheduling.quartz.JobDetailFactoryBean">
+        <property name="jobClass">
+            <value>moe.tsukasa.quartz.cron.local.LocalCacheRefreshJob</value>
+        </property>
+    </bean>
+
+    <!-- 分布式定时任务 -->
+    <bean name="clusterScheduleTask" class="org.springframework.scheduling.quartz.SchedulerFactoryBean">
+        <property name="dataSource" ref="dataSource"/>
+        <property name="applicationContextSchedulerContextKey" value="applicationContextKey"/>
+        <property name="configLocation" value="classpath:quartz.properties"/>
+        <property name="triggers">
+            <list>
+                <ref bean="triggerDataCleanUp"/>
+            </list>
+        </property>
+    </bean>
+
+    <!-- 每天表数据定时清理任务 -->
+    <bean id="triggerDataCleanUp" class="org.springframework.scheduling.quartz.CronTriggerFactoryBean">
+        <property name="jobDetail" ref="dataCleanUpJob"/>
+        <property name="cronExpression" value="0 0 9 * * ?"/>
+    </bean>
+    <bean id="dataCleanUpJob" class="org.springframework.scheduling.quartz.JobDetailFactoryBean">
+        <property name="jobClass">
+            <value>moe.tsukasa.quartz.cron.cluster.DataCleanUpJob</value>
+        </property>
+        <property name="durability" value="true"/>
+        <property name="requestsRecovery" value="true"/>
+        <property name="jobDataMap" ref="dataCleanUpJobParams"/>
+    </bean>
+    <bean id="dataCleanUpJobParams" class="org.quartz.JobDataMap">
+        <constructor-arg>
+            <map>
+                <entry key="tableName" value="t_order"/>
+            </map>
+        </constructor-arg>
+    </bean>
+
+</beans>
